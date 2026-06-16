@@ -36,6 +36,12 @@ GEOD       = Geod(ellps="WGS84")
 ETOPO_GDRIVE_ID = "1WhX46wNCgk7WufVkpk9KO67gtSDSZWjv"
 ETOPO_LOCAL     = "/tmp/ETOPO1_Bed_c_geotiff.tif"
 
+@st.cache_data
+def load_airports():
+    """Load bundled airport coords from the repo."""
+    path = os.path.join(os.path.dirname(__file__), "airport_coords.csv")
+    return pd.read_csv(path)
+
 @st.cache_resource(show_spinner="Downloading terrain file (one-time, ~1 GB)…")
 def ensure_etopo():
     """Download ETOPO1 from Google Drive if not already cached on disk."""
@@ -390,11 +396,9 @@ with st.sidebar:
     # ── Data ──────────────────────────────────────────────────────────────────
     section("Data")
     if mode == "Standard":
-        routes_file   = st.file_uploader("Routes CSV",   type="csv")
-        airports_file = st.file_uploader("Airports CSV", type="csv")
+        routes_file = st.file_uploader("Routes CSV", type="csv")
     else:
-        routes_file_t   = st.file_uploader("Routes CSV",   type="csv", key="routes_t")
-        airports_file_t = st.file_uploader("Airports CSV", type="csv", key="airports_t")
+        routes_file_t = st.file_uploader("Routes CSV", type="csv", key="routes_t")
         st.caption("🌍 ETOPO1 terrain file downloads automatically from Google Drive on first use.")
 
     # ── Map layout ─────────────────────────────────────────────────────────────
@@ -510,13 +514,13 @@ def render_and_show(draw_fn, *args, base_cfg):
 
 # ── Standard mode ─────────────────────────────────────────────────────────────
 if mode == "Standard":
-    st.caption("Upload your CSVs in the sidebar — preview updates automatically as you change settings.")
+    st.caption("Upload your routes CSV — preview updates automatically as you change settings.")
 
-    routes_df = airports_df = None
-    if routes_file:   routes_df   = pd.read_csv(routes_file)
-    if airports_file: airports_df = pd.read_csv(airports_file)
+    airports_df = load_airports()
+    routes_df   = None
+    if routes_file: routes_df = pd.read_csv(routes_file)
 
-    if routes_df is not None and airports_df is not None:
+    if routes_df is not None:
         with st.expander("Preview data", expanded=False):
             p1,p2 = st.columns(2)
             p1.markdown(f"**Routes** — {len(routes_df)} rows")
@@ -537,7 +541,7 @@ if mode == "Standard":
                         excluded_countries=excluded_countries)
             render_and_show(draw_standard, routes_df, airports_df, base_cfg=base)
     else:
-        st.info("Upload both CSVs in the sidebar to get started.")
+        st.info("Upload a routes CSV in the sidebar to get started.")
 
 
 # ── Terrain mode ──────────────────────────────────────────────────────────────
@@ -548,15 +552,15 @@ else:
         st.error("`rasterio` and `scipy` are not installed in this environment.")
         st.stop()
 
-    routes_df_t = airports_df_t = None
-    if routes_file_t:   routes_df_t   = pd.read_csv(routes_file_t)
-    if airports_file_t: airports_df_t = pd.read_csv(airports_file_t)
+    routes_df_t = None
+    airports_df_t = load_airports()
+    if routes_file_t: routes_df_t = pd.read_csv(routes_file_t)
 
     etopo_path = ensure_etopo()
 
     if etopo_path is None:
         st.error("Failed to download ETOPO1 terrain file from Google Drive. Check that the file is publicly shared.")
-    elif routes_df_t is not None and airports_df_t is not None:
+    elif routes_df_t is not None:
         with st.expander("Preview data", expanded=False):
             p1,p2 = st.columns(2)
             p1.markdown(f"**Routes** — {len(routes_df_t)} rows")
