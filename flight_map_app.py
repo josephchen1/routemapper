@@ -302,7 +302,10 @@ def mountain_layer(data, threshold=500):
         m = (m-np.nanmin(m))/(np.nanmax(m)-np.nanmin(m))
     return m*0.3
 
-def draw_terrain(flight_df, dem_data, lat_arr, land_mask, ocean_mask, cfg):
+def draw_terrain(routes_df, airports_df, dem_data, lat_arr, land_mask, ocean_mask, cfg):
+    routes  = load_and_merge(routes_df, airports_df)
+    airports = get_unique_airports(routes)
+
     nrows,ncols = dem_data.shape
     extent = [-180,180,lat_arr.min(),lat_arr.max()]
     proj   = ccrs.PlateCarree(central_longitude=cfg["center_lon"])
@@ -337,30 +340,36 @@ def draw_terrain(flight_df, dem_data, lat_arr, land_mask, ocean_mask, cfg):
         ax.add_feature(cfeature.STATES.with_scale("50m"),edgecolor=cfg["state_color"],
                        linewidth=cfg["state_w"],alpha=0.7,zorder=3)
 
-    labeled={}
-    for _,row in flight_df.iterrows():
-        slat=row["Origin_Lat"]; slon=row["Origin_Lon"]
-        elat=row["Destination_Lat"]; elon=row["Destination_Lon"]
-        color=str(row.get("Color",cfg["route_color"]))
-        lw   =float(row.get("line_thickness",cfg["route_lw"]))
-        lats,lons = great_circle_slerp((slat,slon),(elat,elon))
-        ax.plot(lons,lats,transform=ccrs.Geodetic(),color=color,linewidth=lw,
-                alpha=cfg["route_alpha"],zorder=4)
+    # Routes — same merged format as standard mode
+    valid    = set(cfg["regions"])
+    filtered = routes[routes["region_orig"].isin(valid) & routes["region_dest"].isin(valid)]
+    filtered = filtered.sort_values("zorder", ascending=True)
 
-        for (lat,lon,ps,fs,lbl) in [
-            (slat,slon,row.get("Origin_Point_Size",np.nan),
-             row.get("origin_font_size",np.nan),str(row.get("Origin","")).strip()),
-            (elat,elon,row.get("Destination_Point_Size",np.nan),
-             row.get("destination_font_size",np.nan),str(row.get("Destination","")).strip()),
-        ]:
-            if pd.notna(ps) and ps>0 and lbl and pd.notna(fs):
-                ax.scatter(lon,lat,transform=ccrs.PlateCarree(),s=ps,
-                           color=cfg["dot_color"],zorder=5)
-                if (lat,lon) not in labeled:
-                    ax.text(lon,lat+cfg["label_offset"],lbl,transform=ccrs.PlateCarree(),
-                            fontsize=fs,color=cfg["label_color"],
-                            zorder=6,ha="center",va="bottom")
-                    labeled[(lat,lon)]=lbl
+    for _, row in filtered.iterrows():
+        color = str(row.get("color", cfg["route_color"])) if cfg.get("use_csv_colors", True) else cfg["route_color"]
+        lw    = float(row.get("linewidth", cfg["route_lw"]))
+        style = "-" if str(row.get("style","solid"))=="solid" else "--"
+        lats,lons = great_circle_slerp(
+            (row["lat_orig"], row["lon_orig"]),
+            (row["lat_dest"], row["lon_dest"])
+        )
+        ax.plot(lons,lats,transform=ccrs.Geodetic(),color=color,linewidth=lw,
+                linestyle=style,alpha=cfg["route_alpha"],zorder=4)
+
+    # Airport dots + labels
+    shadow  = [PathEffects.withStroke(linewidth=2.5, foreground="white", alpha=0.8)]
+    fa      = {c:i for c,i in airports.items() if i.get("region") in valid}
+    labeled = {}
+    for code, info in fa.items():
+        lon, lat = info["lon"], info["lat"]
+        ax.scatter(lon, lat, transform=ccrs.PlateCarree(),
+                   s=info["dot_size"]*10, color=cfg["dot_color"], zorder=5)
+        if info["label_size"] > 0 and (lat,lon) not in labeled:
+            ax.text(lon, lat+cfg["label_offset"], code,
+                    transform=ccrs.PlateCarree(), fontsize=info["label_size"],
+                    color=cfg["label_color"], fontweight="bold",
+                    zorder=6, ha="center", va="bottom", path_effects=shadow)
+            labeled[(lat,lon)] = code
 
     ax.set_axis_off(); plt.tight_layout(pad=0)
     buf=io.BytesIO()
@@ -384,7 +393,8 @@ with st.sidebar:
         routes_file   = st.file_uploader("Routes CSV",   type="csv")
         airports_file = st.file_uploader("Airports CSV", type="csv")
     else:
-        flights_file = st.file_uploader("Flight data CSV (UA_points format)", type="csv")
+        routes_file_t   = st.file_uploader("Routes CSV",   type="csv", key="routes_t")
+        airports_file_t = st.file_uploader("Airports CSV", type="csv", key="airports_t")
         st.caption("🌍 ETOPO1 terrain file downloads automatically from Google Drive on first use.")
 
     # ── Map layout ─────────────────────────────────────────────────────────────
@@ -407,6 +417,14 @@ with st.sidebar:
         regions = st.multiselect("Include", all_regions,
                                   default=["Domestic","Pacific","Atlantic","South",
                                            "Mexico","Central","Caribbean"])
+
+    if mode == "Terrain (ETOPO)":
+        section("Regions")
+        all_regions_t = ["Domestic","Pacific","Atlantic","South","Mexico","Central","Caribbean","Other"]
+        regions_t = st.multiselect("Include", all_regions_t,
+                                    default=["Domestic","Pacific","Atlantic","South",
+                                             "Mexico","Central","Caribbean"],
+                                    key="regions_t")
 
     # ── Terrain options ───────────────────────────────────────────────────────
     if mode == "Terrain (ETOPO)":
@@ -530,22 +548,26 @@ else:
         st.error("`rasterio` and `scipy` are not installed in this environment.")
         st.stop()
 
-    flight_df = None
-    if flights_file:
-        flight_df = pd.read_csv(flights_file)
+    routes_df_t = airports_df_t = None
+    if routes_file_t:   routes_df_t   = pd.read_csv(routes_file_t)
+    if airports_file_t: airports_df_t = pd.read_csv(airports_file_t)
 
-    # Download / locate ETOPO file
     etopo_path = ensure_etopo()
 
     if etopo_path is None:
         st.error("Failed to download ETOPO1 terrain file from Google Drive. Check that the file is publicly shared.")
-    elif flight_df is not None and etopo_path:
+    elif routes_df_t is not None and airports_df_t is not None:
         with st.expander("Preview data", expanded=False):
-            st.dataframe(flight_df.head(10), use_container_width=True)
+            p1,p2 = st.columns(2)
+            p1.markdown(f"**Routes** — {len(routes_df_t)} rows")
+            p1.dataframe(routes_df_t.head(8), use_container_width=True)
+            p2.markdown(f"**Airports** — {len(airports_df_t)} rows")
+            p2.dataframe(airports_df_t.head(8), use_container_width=True)
 
         dem_data, lat_arr, land_mask, ocean_mask, _ = load_dem(etopo_path, downsample)
 
         base = dict(center_lon=center_lon, fig_w=fig_w, fig_h=fig_h,
+                    regions=regions_t, use_csv_colors=True,
                     show_glow=show_glow, glow_factor=glow_factor,
                     show_mountains=show_mountains, mountain_thresh=mountain_thresh,
                     land_color=land_color, show_borders=show_borders, show_states=show_states,
@@ -554,7 +576,7 @@ else:
                     route_color=route_color, route_lw=route_lw, route_alpha=route_alpha,
                     dot_color=dot_color, label_color=label_color, label_offset=label_offset)
 
-        render_and_show(draw_terrain, flight_df, dem_data, lat_arr, land_mask, ocean_mask,
-                        base_cfg=base)
+        render_and_show(draw_terrain, routes_df_t, airports_df_t,
+                        dem_data, lat_arr, land_mask, ocean_mask, base_cfg=base)
     else:
-        st.info("Upload your flight CSV in the sidebar to get started.")
+        st.info("Upload both CSVs in the sidebar to get started.")
