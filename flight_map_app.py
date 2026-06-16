@@ -39,8 +39,7 @@ ETOPO_LOCAL     = "/tmp/ETOPO1_Bed_c_geotiff.tif"
 @st.cache_data
 def load_airports():
     """Load bundled airport coords from the repo."""
-    path = os.path.join(os.path.dirname(__file__), "airport_coords.csv")
-    return pd.read_csv(path)
+    return pd.read_csv("airport_coords.csv")
 
 @st.cache_resource(show_spinner="Downloading terrain file (one-time, ~1 GB)…")
 def ensure_etopo():
@@ -144,16 +143,20 @@ def great_circle_slerp(start, end, num_points=400):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def load_and_merge(routes_df, airports_df):
-    r = routes_df.copy();   r.columns = r.columns.str.strip().str.lower()
-    a = airports_df.copy(); a.columns = a.columns.str.strip().str.lower()
-    r = r.merge(a.rename(columns={"iata":"origin","longitude":"lon_orig",
-                                    "latitude":"lat_orig","region":"region_orig"}),
-                on="origin", how="left")
-    r = r.merge(a.rename(columns={"iata":"dest","longitude":"lon_dest",
-                                    "latitude":"lat_dest","region":"region_dest"}),
-                on="dest", how="left")
-    return r.drop_duplicates(subset=["origin","dest","lon_orig","lat_orig",
-                                      "lon_dest","lat_dest"]).reset_index(drop=True)
+    r = routes_df.copy()
+    a = airports_df.copy()
+    r.columns = r.columns.str.strip().str.lower()
+    a.columns = a.columns.str.strip().str.lower()
+
+    a_orig = a.rename(columns={"longitude":"lon_orig","latitude":"lat_orig","region":"region_orig"})
+    r = r.merge(a_orig, left_on="origin", right_on="iata", how="left").drop(columns=["iata"])
+
+    a_dest = a.rename(columns={"longitude":"lon_dest","latitude":"lat_dest","region":"region_dest"})
+    r = r.merge(a_dest, left_on="dest", right_on="iata", how="left").drop(columns=["iata"])
+
+    return r.drop_duplicates(
+        subset=["origin","dest","lon_orig","lat_orig","lon_dest","lat_dest"]
+    ).reset_index(drop=True)
 
 def get_unique_airports(routes):
     unique = {}
