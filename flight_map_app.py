@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Flight Map Generator — Streamlit Web App
-Supports two modes: Standard (Cartopy shapes) and Terrain (ETOPO1 GeoTIFF, local only)
+Supports two modes: Standard (Cartopy shapes) and Terrain (ETOPO1 GeoTIFF, auto-downloaded)
 """
 
 import streamlit as st
@@ -33,6 +33,20 @@ except ImportError:
     RASTERIO_OK = False
 
 GEOD       = Geod(ellps="WGS84")
+ETOPO_GDRIVE_ID = "1WhX46wNCgk7WufVkpk9KO67gtSDSZWjv"
+ETOPO_LOCAL     = "/tmp/ETOPO1_Bed_c_geotiff.tif"
+
+@st.cache_resource(show_spinner="Downloading terrain file (one-time, ~1 GB)…")
+def ensure_etopo():
+    """Download ETOPO1 from Google Drive if not already cached on disk."""
+    if os.path.exists(ETOPO_LOCAL):
+        return ETOPO_LOCAL
+    try:
+        import gdown
+        gdown.download(id=ETOPO_GDRIVE_ID, output=ETOPO_LOCAL, quiet=False)
+        return ETOPO_LOCAL
+    except Exception as e:
+        return None
 HALO_COLOR = np.array([170/255, 197/255, 251/255])
 mpl.rcParams['font.family'] = 'Arial'
 
@@ -371,8 +385,7 @@ with st.sidebar:
         airports_file = st.file_uploader("Airports CSV", type="csv")
     else:
         flights_file = st.file_uploader("Flight data CSV (UA_points format)", type="csv")
-        etopo_path   = st.text_input("ETOPO1 .tif path",
-                                      placeholder=r"C:\...\ETOPO1_Bed_c_geotiff.tif")
+        st.caption("🌍 ETOPO1 terrain file downloads automatically from Google Drive on first use.")
 
     # ── Map layout ─────────────────────────────────────────────────────────────
     section("Map Layout")
@@ -511,20 +524,26 @@ if mode == "Standard":
 
 # ── Terrain mode ──────────────────────────────────────────────────────────────
 else:
-    st.caption("Run locally with your ETOPO1 GeoTIFF. Enter the path in the sidebar.")
+    st.caption("ETOPO1 terrain file downloads automatically from Google Drive on first use (~1 GB, cached for the session).")
 
     if not RASTERIO_OK:
-        st.error("`rasterio` and `scipy` required. Run: `pip install rasterio scipy`")
+        st.error("`rasterio` and `scipy` are not installed in this environment.")
         st.stop()
 
     flight_df = None
-    if flights_file: flight_df = pd.read_csv(flights_file)
+    if flights_file:
+        flight_df = pd.read_csv(flights_file)
 
-    if flight_df is not None and etopo_path and os.path.exists(etopo_path.strip()):
+    # Download / locate ETOPO file
+    etopo_path = ensure_etopo()
+
+    if etopo_path is None:
+        st.error("Failed to download ETOPO1 terrain file from Google Drive. Check that the file is publicly shared.")
+    elif flight_df is not None and etopo_path:
         with st.expander("Preview data", expanded=False):
             st.dataframe(flight_df.head(10), use_container_width=True)
 
-        dem_data, lat_arr, land_mask, ocean_mask, _ = load_dem(etopo_path.strip(), downsample)
+        dem_data, lat_arr, land_mask, ocean_mask, _ = load_dem(etopo_path, downsample)
 
         base = dict(center_lon=center_lon, fig_w=fig_w, fig_h=fig_h,
                     show_glow=show_glow, glow_factor=glow_factor,
@@ -537,9 +556,5 @@ else:
 
         render_and_show(draw_terrain, flight_df, dem_data, lat_arr, land_mask, ocean_mask,
                         base_cfg=base)
-    elif flight_df is None:
-        st.info("Upload your flight CSV in the sidebar.")
-    elif not etopo_path:
-        st.info("Enter the path to your ETOPO1 .tif file in the sidebar.")
     else:
-        st.error(f"File not found: `{etopo_path.strip()}`")
+        st.info("Upload your flight CSV in the sidebar to get started.")
