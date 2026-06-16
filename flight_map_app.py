@@ -302,7 +302,7 @@ def mountain_layer(data, threshold=500):
         m = (m-np.nanmin(m))/(np.nanmax(m)-np.nanmin(m))
     return m*0.3
 
-def draw_terrain(flight_df, cfg, dem_data, lat_arr, land_mask, ocean_mask):
+def draw_terrain(flight_df, dem_data, lat_arr, land_mask, ocean_mask, cfg):
     nrows,ncols = dem_data.shape
     extent = [-180,180,lat_arr.min(),lat_arr.max()]
     proj   = ccrs.PlateCarree(central_longitude=cfg["center_lon"])
