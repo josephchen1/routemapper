@@ -53,7 +53,8 @@ def ensure_etopo():
     except Exception as e:
         return None
 HALO_COLOR = np.array([170/255, 197/255, 251/255])
-mpl.rcParams['font.family'] = 'Arial'
+mpl.rcParams['font.family'] = 'sans-serif'
+mpl.rcParams['font.sans-serif'] = ['Liberation Sans', 'DejaVu Sans', 'Arial', 'Helvetica']
 
 ALL_COUNTRIES = sorted([
     "Afghanistan","Albania","Algeria","Angola","Argentina","Armenia","Australia",
@@ -496,21 +497,21 @@ def render_and_show(draw_fn, *args, base_cfg):
     with st.spinner("Updating preview…"):
         try:
             prev = draw_fn(*args, {**base_cfg, "dpi":72, "fmt":"PNG", "is_preview":True})
-            st.image(prev, use_container_width=True,
+            st.image(prev, width='stretch',
                      caption="Live preview (72 DPI) — use Export for full resolution")
         except Exception as e:
             st.error(f"Preview error: {e}"); st.exception(e); return
 
     # Export
     col_btn, col_dl = st.columns([1,3])
-    if col_btn.button("⬇️ Export full-res", type="primary", use_container_width=True):
+    if col_btn.button("⬇️ Export full-res", type="primary", width='stretch'):
         with st.spinner(f"Rendering at {export_dpi} DPI…"):
             try:
                 exp = draw_fn(*args, {**base_cfg, "dpi":export_dpi, "fmt":fmt, "is_preview":False})
                 mime = {"PNG":"image/png","PDF":"application/pdf","SVG":"image/svg+xml"}[fmt]
                 col_dl.download_button(f"Download {fmt}", exp,
                                         file_name=f"flight_map.{fmt.lower()}",
-                                        mime=mime, use_container_width=True)
+                                        mime=mime, width='stretch')
             except Exception as e:
                 st.error(f"Export error: {e}"); st.exception(e)
 
@@ -527,9 +528,9 @@ if mode == "Standard":
         with st.expander("Preview data", expanded=False):
             p1,p2 = st.columns(2)
             p1.markdown(f"**Routes** — {len(routes_df)} rows")
-            p1.dataframe(routes_df.head(8), use_container_width=True)
+            p1.dataframe(routes_df.head(8), width='stretch')
             p2.markdown(f"**Airports** — {len(airports_df)} rows")
-            p2.dataframe(airports_df.head(8), use_container_width=True)
+            p2.dataframe(airports_df.head(8), width='stretch')
 
         if not regions:
             st.warning("Select at least one region in the sidebar.")
@@ -567,9 +568,9 @@ else:
         with st.expander("Preview data", expanded=False):
             p1,p2 = st.columns(2)
             p1.markdown(f"**Routes** — {len(routes_df_t)} rows")
-            p1.dataframe(routes_df_t.head(8), use_container_width=True)
+            p1.dataframe(routes_df_t.head(8), width='stretch')
             p2.markdown(f"**Airports** — {len(airports_df_t)} rows")
-            p2.dataframe(airports_df_t.head(8), use_container_width=True)
+            p2.dataframe(airports_df_t.head(8), width='stretch')
 
         dem_data, lat_arr, land_mask, ocean_mask, _ = load_dem(etopo_path, downsample)
 
