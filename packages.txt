@@ -1,3 +1,4 @@
+python3-cartopy
 libgeos-dev
 libproj-dev
 proj-data
