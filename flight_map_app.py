@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Flight Map Generator — Streamlit Web App
+Flight Map Generator — Streamlit Web App (no ETOPO)
 """
 
 import streamlit as st
@@ -22,7 +22,32 @@ except ImportError:
 
 GEOD = Geod(ellps="WGS84")
 
-# ── Page config ───────────────────────────────────────────────────────────────
+ALL_COUNTRIES = [
+    "Afghanistan","Albania","Algeria","Angola","Argentina","Armenia","Australia",
+    "Austria","Azerbaijan","Bahrain","Bangladesh","Belarus","Belgium","Belize",
+    "Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil",
+    "Brunei","Bulgaria","Burkina Faso","Burundi","Cambodia","Cameroon","Canada",
+    "Central African Republic","Chad","Chile","China","Colombia","Costa Rica",
+    "Croatia","Cuba","Czech Republic","Democratic Republic of the Congo",
+    "Denmark","Dominican Republic","Ecuador","Egypt","El Salvador","Estonia",
+    "Ethiopia","Finland","France","Gabon","Germany","Ghana","Greece","Guatemala",
+    "Guinea","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran",
+    "Iraq","Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan",
+    "Kenya","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho",
+    "Libya","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Mali",
+    "Mauritania","Mexico","Moldova","Mongolia","Montenegro","Morocco","Mozambique",
+    "Myanmar","Namibia","Nepal","Netherlands","New Zealand","Nicaragua","Niger",
+    "Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Panama",
+    "Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal",
+    "Qatar","Republic of the Congo","Romania","Russia","Rwanda","Saudi Arabia",
+    "Senegal","Serbia","Sierra Leone","Slovakia","Slovenia","Somalia","South Africa",
+    "South Korea","South Sudan","Spain","Sri Lanka","Sudan","Sweden","Switzerland",
+    "Syria","Taiwan","Tajikistan","Tanzania","Thailand","Togo","Tunisia","Turkey",
+    "Turkmenistan","Uganda","Ukraine","United Arab Emirates","United Kingdom",
+    "United States of America","Uruguay","Uzbekistan","Venezuela","Vietnam",
+    "Yemen","Zambia","Zimbabwe","Greenland","Puerto Rico","Kosovo"
+]
+
 st.set_page_config(
     page_title="Flight Map Generator",
     page_icon="✈️",
@@ -120,13 +145,15 @@ def draw_map(routes_df, airports_df, cfg):
     ax.set_facecolor("white")
     ax.set_global()
 
-    # ── Land fill ─────────────────────────────────────────────────────────────
+    # ── Land fill — excluded countries get ocean (white) fill ─────────────────
+    excluded = set(cfg["excluded_countries"])
     countries_shp = shpreader.natural_earth(resolution="50m", category="cultural",
                                              name="admin_0_countries")
     for rec in shpreader.Reader(countries_shp).records():
-        if rec.attributes.get("NAME", "") not in cfg["excluded_countries"]:
-            ax.add_geometries([rec.geometry], ccrs.PlateCarree(),
-                              facecolor=cfg["land_color"], edgecolor="none", zorder=2)
+        name = rec.attributes.get("NAME", "") or rec.attributes.get("ADMIN", "")
+        color = "white" if name in excluded else cfg["land_color"]
+        ax.add_geometries([rec.geometry], ccrs.PlateCarree(),
+                          facecolor=color, edgecolor="none", zorder=2)
 
     # ── Great Lakes ───────────────────────────────────────────────────────────
     if cfg["great_lakes"]:
@@ -148,7 +175,7 @@ def draw_map(routes_df, airports_df, cfg):
                        alpha=0.7, zorder=3.6)
 
     # ── Routes ────────────────────────────────────────────────────────────────
-    valid = set(cfg["regions"])
+    valid    = set(cfg["regions"])
     filtered = routes[routes["region_orig"].isin(valid) & routes["region_dest"].isin(valid)]
     filtered = filtered.sort_values("zorder", ascending=True)
 
@@ -164,11 +191,11 @@ def draw_map(routes_df, airports_df, cfg):
                 alpha=cfg["route_alpha"], zorder=z)
 
     # ── Airports ──────────────────────────────────────────────────────────────
-    shadow = [PathEffects.withStroke(linewidth=2.5, foreground="white", alpha=0.8)]
+    shadow           = [PathEffects.withStroke(linewidth=2.5, foreground="white", alpha=0.8)]
     filtered_airports = {c: i for c, i in airports.items() if i.get("region") in valid}
 
-    col_regions  = [r for r in ["Mexico", "Central", "Caribbean"] if r in valid]
-    col_params   = {
+    col_regions = [r for r in ["Mexico", "Central", "Caribbean"] if r in valid]
+    col_params  = {
         "Mexico":    (-135, 33,  -2.5, 1.8),
         "Central":   (-106, 14,  -2.5, 1.8),
         "Caribbean": (-61,  35,  -2.5, 2.2),
@@ -177,9 +204,9 @@ def draw_map(routes_df, airports_df, cfg):
                                key=lambda x: x["lat"], reverse=True)
                     for r in col_regions}
 
-    all_labels   = {}
-    texts        = []
-    pts          = []
+    all_labels = {}
+    texts      = []
+    pts        = []
 
     for region in col_regions:
         sl, slat, lsp, lsl = col_params[region]
@@ -209,7 +236,7 @@ def draw_map(routes_df, airports_df, cfg):
             pts.append(pt[0])
             all_labels[txt] = (lon, lat)
 
-    if texts and ADJUSTTEXT_OK:
+    if texts and ADJUSTTEXT_OK and not cfg["is_preview"]:
         adjust_text(texts, add_objects=pts, ax=ax,
                     expand_points=(2.0, 3.0), expand_text=(2.5, 3.0),
                     force_points=2.5, force_text=3.0, add_step_breaks=True,
@@ -219,7 +246,8 @@ def draw_map(routes_df, airports_df, cfg):
         tx, ty = txt.get_position()
         ax.plot([ox, tx], [oy, ty], color="lightgray", linewidth=0.4, alpha=0.8,
                 zorder=6, transform=ccrs.PlateCarree(),
-                path_effects=[PathEffects.withStroke(linewidth=0.8, foreground="white", alpha=0.8)])
+                path_effects=[PathEffects.withStroke(linewidth=0.8,
+                                                      foreground="white", alpha=0.8)])
 
     ax.set_xticks([])
     ax.set_yticks([])
@@ -251,8 +279,8 @@ with st.sidebar:
     c1, c2 = st.columns(2)
     fig_w = c1.number_input("Width (in)",  8, 36, 18)
     fig_h = c2.number_input("Height (in)", 4, 20,  9)
-    dpi   = st.select_slider("DPI", [72, 150, 300, 600], value=150,
-                              help="72–150 for preview, 300–600 for final export")
+    export_dpi = st.select_slider("Export DPI", [150, 300, 600], value=300,
+                                   help="Preview always uses 72 DPI. This only affects the download.")
 
     section("Regions")
     all_regions = ["Domestic","Pacific","Atlantic","South","Mexico","Central","Caribbean","Other"]
@@ -264,8 +292,8 @@ with st.sidebar:
     use_csv_colors = st.checkbox("Use colors from CSV", value=True)
     route_color    = st.color_picker("Default color", "#005DAA")
     c3, c4 = st.columns(2)
-    route_lw    = c3.slider("Line width",  0.3, 3.0, 1.0, 0.1)
-    route_alpha = c4.slider("Opacity",     0.1, 1.0, 1.0, 0.05)
+    route_lw    = c3.slider("Line width", 0.3, 3.0, 1.0, 0.1)
+    route_alpha = c4.slider("Opacity",    0.1, 1.0, 1.0, 0.05)
 
     section("Airports")
     c5, c6 = st.columns(2)
@@ -284,31 +312,27 @@ with st.sidebar:
     state_color = c10.color_picker("State color", "#ffffff")
     state_w     = st.slider("State border width", 0.1, 2.0, 0.3, 0.1)
 
+    section("Exclude Countries")
+    excluded_countries = st.multiselect(
+        "Hide these countries (show as ocean)",
+        options=sorted(ALL_COUNTRIES),
+        default=[],
+        help="Selected countries will appear as white (ocean color) instead of land color"
+    )
+
     section("Output")
     fmt = st.selectbox("Format", ["PNG", "PDF", "SVG"])
-
-    excluded_countries: list[str] = []   # extend via future UI if needed
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 st.title("✈️ Flight Map Generator")
-st.caption("Upload your CSVs, adjust settings in the sidebar, then generate.")
-
-col_gen, _ = st.columns([1, 3])
-generate = col_gen.button("🗺️ Generate Map", type="primary", use_container_width=True)
-
-with st.expander("Preview data", expanded=False):
-    pc1, pc2 = st.columns(2)
+st.caption("Upload your CSVs, tweak settings, and the preview updates automatically. Hit **Export** for full-res download.")
 
 routes_df = airports_df = None
-
 if routes_file:
     routes_df = pd.read_csv(routes_file)
 if airports_file:
     airports_df = pd.read_csv(airports_file)
-
-with st.expander("Preview data", expanded=False):
-    pass   # placeholder — real preview below
 
 if routes_df is not None and airports_df is not None:
     with st.expander("Preview loaded data", expanded=False):
@@ -318,33 +342,57 @@ if routes_df is not None and airports_df is not None:
         p2.markdown(f"**Airports** — {len(airports_df)} rows")
         p2.dataframe(airports_df.head(8), use_container_width=True)
 
-if generate:
-    if routes_df is None or airports_df is None:
-        st.error("Upload both a Routes CSV and an Airports CSV first.")
-    elif not regions:
-        st.error("Select at least one region.")
-    else:
-        cfg = dict(
-            center_lon=center_lon, fig_w=fig_w, fig_h=fig_h, dpi=dpi,
-            regions=regions, use_csv_colors=use_csv_colors,
-            route_color=route_color, route_lw=route_lw, route_alpha=route_alpha,
-            dot_color=dot_color, label_color=label_color, land_color=land_color,
-            show_borders=show_borders, show_states=show_states, great_lakes=great_lakes,
-            border_color=border_color, border_w=border_w,
-            state_color=state_color, state_w=state_w,
-            fmt=fmt, excluded_countries=excluded_countries,
-        )
-        with st.spinner("Rendering… (30–60 sec at 300+ DPI)"):
+# ── Build shared cfg (minus dpi — differs between preview and export) ─────────
+def make_cfg(dpi, is_preview):
+    return dict(
+        center_lon=center_lon, fig_w=fig_w, fig_h=fig_h, dpi=dpi,
+        regions=regions, use_csv_colors=use_csv_colors,
+        route_color=route_color, route_lw=route_lw, route_alpha=route_alpha,
+        dot_color=dot_color, label_color=label_color, land_color=land_color,
+        show_borders=show_borders, show_states=show_states, great_lakes=great_lakes,
+        border_color=border_color, border_w=border_w,
+        state_color=state_color, state_w=state_w,
+        fmt="PNG", excluded_countries=excluded_countries,
+        is_preview=is_preview,
+    )
+
+preview_placeholder = st.empty()
+export_placeholder  = st.empty()
+
+if routes_df is not None and airports_df is not None and regions:
+    # ── Live preview (72 DPI, no adjustText) ──────────────────────────────────
+    with preview_placeholder.container():
+        with st.spinner("Updating preview…"):
             try:
-                buf = draw_map(routes_df, airports_df, cfg)
-                st.success("Done!")
-                if fmt == "PNG":
-                    st.image(buf, use_container_width=True)
-                    buf.seek(0)
-                mime = {"PNG": "image/png", "PDF": "application/pdf", "SVG": "image/svg+xml"}[fmt]
-                st.download_button(f"⬇️ Download {fmt}", buf,
-                                   file_name=f"flight_map.{fmt.lower()}", mime=mime,
-                                   use_container_width=True)
+                prev_buf = draw_map(routes_df, airports_df, make_cfg(dpi=72, is_preview=True))
+                st.image(prev_buf, use_container_width=True,
+                         caption="Live preview (72 DPI) — export below for full resolution")
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Preview error: {e}")
                 st.exception(e)
+
+    # ── Export button ──────────────────────────────────────────────────────────
+    with export_placeholder.container():
+        col_btn, col_dl = st.columns([1, 3])
+        if col_btn.button("⬇️ Export full-res", type="primary", use_container_width=True):
+            with st.spinner(f"Rendering at {export_dpi} DPI…"):
+                try:
+                    export_cfg = make_cfg(dpi=export_dpi, is_preview=False)
+                    export_cfg["fmt"] = fmt
+                    exp_buf = draw_map(routes_df, airports_df, export_cfg)
+                    mime = {"PNG": "image/png", "PDF": "application/pdf",
+                            "SVG": "image/svg+xml"}[fmt]
+                    col_dl.download_button(
+                        f"Click to download {fmt}",
+                        exp_buf,
+                        file_name=f"flight_map.{fmt.lower()}",
+                        mime=mime,
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"Export error: {e}")
+                    st.exception(e)
+elif routes_df is None or airports_df is None:
+    st.info("Upload both CSVs in the sidebar to get started.")
+elif not regions:
+    st.warning("Select at least one region in the sidebar.")
